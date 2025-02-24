@@ -8,9 +8,9 @@ use reth_network_api::test_utils::PeersHandleProvider;
 use reth_node_builder::{
     components::NodeComponentsBuilder,
     rpc::{EngineValidatorAddOn, RethRpcAddOns},
-    EngineNodeLauncher, FullNodeTypesAdapter, Node, NodeAdapter, NodeBuilder, NodeComponents,
-    NodeConfig, NodeHandle, NodeTypesWithDBAdapter, NodeTypesWithEngine, PayloadAttributesBuilder,
-    PayloadTypes,
+    BuilderComponentsAdapter, EngineNodeLauncher, FullNodeTypesAdapter, Node, NodeAdapter,
+    NodeBuilder, NodeComponents, NodeConfig, NodeHandle, NodeTypesWithDBAdapter,
+    NodeTypesWithEngine, PayloadAttributesBuilder, PayloadTypes,
 };
 use reth_node_core::args::{DiscoveryArgs, NetworkArgs, RpcServerArgs};
 use reth_provider::providers::{BlockchainProvider, NodeTypesForProvider};
@@ -165,7 +165,9 @@ where
         let NodeHandle { node, node_exit_future: _ } = NodeBuilder::new(node_config.clone())
             .testing_node(exec.clone())
             .with_types_and_provider::<N, BlockchainProvider<_>>()
-            .with_components(node.components_builder())
+            .with_components::<BuilderComponentsAdapter<FullNodeTypesAdapter<_, _, _>, _>>(
+                node.components_builder(),
+            )
             .with_add_ons(node.add_ons())
             .launch_with_fn(|builder| {
                 let launcher = EngineNodeLauncher::new(
