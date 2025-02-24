@@ -5,9 +5,8 @@ use crate::{
     hooks::NodeHooks,
     rpc::{EngineValidatorAddOn, RethRpcAddOns, RpcHandle},
     setup::build_networked_pipeline,
-    AddOnsContext, BuilderComponentsAdapter, BuilderInternals, ExExLauncher, FullNode,
-    LaunchContext, LaunchNode, NodeAdapter, NodeBuilderWithComponents, NodeComponents,
-    NodeComponentsBuilder, NodeHandle,
+    AddOnsContext, BuilderInternals, ExExLauncher, FullNode, LaunchContext, LaunchNode,
+    NodeAdapter, NodeBuilderWithComponents, NodeComponents, NodeHandle,
 };
 use alloy_consensus::BlockHeader;
 use futures::{future::Either, stream, stream_select, StreamExt};
@@ -25,8 +24,8 @@ use reth_exex::ExExManagerHandle;
 use reth_network::{NetworkSyncUpdater, SyncState};
 use reth_network_api::BlockDownloaderProvider;
 use reth_node_api::{
-    BeaconConsensusEngineHandle, BuiltPayload, FullNodeTypes, NodeTypes, NodeTypesWithDBAdapter,
-    NodeTypesWithEngine, PayloadAttributesBuilder, PayloadTypes,
+    BeaconConsensusEngineHandle, BuiltPayload, FullNodeTypes, NodeAddOns, NodeTypes,
+    NodeTypesWithDBAdapter, NodeTypesWithEngine, PayloadAttributesBuilder, PayloadTypes,
 };
 use reth_node_core::{
     dirs::{ChainPath, DataDirPath},
@@ -68,29 +67,29 @@ impl EngineNodeLauncher {
     }
 }
 
-impl<T, CB, AO> LaunchNode<NodeBuilderWithComponents<BuilderComponentsAdapter<T, CB, AO>>>
+impl<T> LaunchNode<NodeBuilderWithComponents<T>>
     for EngineNodeLauncher
 where
-    T: FullNodeTypes<Types = T> + NodeTypes + NodeTypesWithEngine,
-    T::Types: NodeTypesForProvider + NodeTypesWithEngine,
-    T::DB: Database + DatabaseMetrics + Clone + Unpin + 'static,
-    T::Provider: From<BlockchainProvider<NodeTypesWithDBAdapter<T::Types, T::DB>>>
-        + AsRef<BlockchainProvider<NodeTypesWithDBAdapter<T::Types, T::DB>>>
-        + CanonChainTracker,
-    <T as NodeTypes>::ChainSpec: EthChainSpec + EthereumHardforks + 'static,
-    CB: NodeComponentsBuilder<T> + Clone,
-    AO: RethRpcAddOns<NodeAdapter<T, CB::Components>>
-        + EngineValidatorAddOn<NodeAdapter<T, CB::Components>>
+    T: BuilderInternals + FullNodeTypes,
+    <T as BuilderInternals>::Types: FullNodeTypes<Types = <T as BuilderInternals>::Types> + NodeTypes + NodeTypesWithEngine,
+<<T as BuilderInternals>::Types as FullNodeTypes>::Types: NodeTypesForProvider + NodeTypesWithEngine,
+<<T as BuilderInternals>::Types as FullNodeTypes>::DB: Database + DatabaseMetrics + Clone + Unpin + 'static,
+<<T as BuilderInternals>::Types as FullNodeTypes>::Provider: From<BlockchainProvider<NodeTypesWithDBAdapter<<<T as BuilderInternals>::Types as FullNodeTypes>::Types, <<T as BuilderInternals>::Types as FullNodeTypes>::DB>>>
+    + AsRef<BlockchainProvider<NodeTypesWithDBAdapter<<<T as BuilderInternals>::Types as FullNodeTypes>::Types, <<T as BuilderInternals>::Types as FullNodeTypes>::DB>>>
+    + CanonChainTracker,
+<<T as BuilderInternals>::Types as NodeTypes>::ChainSpec: EthChainSpec + EthereumHardforks + 'static,
+    T::AddOns: RethRpcAddOns<NodeAdapter<<T as BuilderInternals>::Types, T::Components>>
+        + EngineValidatorAddOn<NodeAdapter<<T as BuilderInternals>::Types, T::Components>>
         + Default,
-    LocalPayloadAttributesBuilder<<T as NodeTypes>::ChainSpec>: PayloadAttributesBuilder<
-        <<T::Types as NodeTypesWithEngine>::Engine as PayloadTypes>::PayloadAttributes,
-    >,
+LocalPayloadAttributesBuilder<<<T as BuilderInternals>::Types as NodeTypes>::ChainSpec>: PayloadAttributesBuilder<
+        <<<<T as BuilderInternals>::Types as FullNodeTypes>::Types as NodeTypesWithEngine>::Engine as PayloadTypes>::PayloadAttributes,
+>,
 {
-    type Node = NodeHandle<NodeAdapter<T, CB::Components>, AO>;
+    type Node = NodeHandle<NodeAdapter<<T as BuilderInternals>::Types, T::Components>, T::AddOns>;
 
     async fn launch_node(
         self,
-        target: NodeBuilderWithComponents<BuilderComponentsAdapter<T, CB, AO>>,
+        target: NodeBuilderWithComponents<T>,
     ) -> eyre::Result<Self::Node> {
         let Self { ctx, engine_tree_config } = self;
         let NodeBuilderWithComponents { mut adapter } = target;
@@ -126,13 +125,13 @@ where
                 debug!(target: "reth::cli", chain=%this.chain_id(), genesis=?this.genesis_hash(), "Initializing genesis");
             })
             .with_genesis()?
-            .inspect(|this: &LaunchContextWith<Attached<WithConfigs<<T as NodeTypes>::ChainSpec>, _>>| {
+            .inspect(|this: &LaunchContextWith<Attached<WithConfigs<<<T as BuilderInternals>::Types as NodeTypes>::ChainSpec>, _>>| {
                 info!(target: "reth::cli", "\n{}", this.chain_spec().display_hardforks());
             })
             .with_metrics_task()
             // passing FullNodeTypes as type parameter here so that we can build
             // later the components.
-            .with_blockchain_db::<T, _>(move |provider_factory| {
+            .with_blockchain_db::<<T as BuilderInternals>::Types, _>(move |provider_factory| {
                 Ok(BlockchainProvider::new(provider_factory)?.into())
             })?
             .with_components(components_builder, on_component_initialized).await?;
@@ -320,7 +319,7 @@ where
                 Arc::new(block_provider),
             );
             ctx.task_executor().spawn_critical("etherscan consensus client", async move {
-                rpc_consensus_client.run::<<T::Types as NodeTypesWithEngine>::Engine>().await
+                rpc_consensus_client.run::<<<T as BuilderInternals>::Types as NodeTypesWithEngine>::Engine>().await
             });
         }
 
